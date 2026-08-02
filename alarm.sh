@@ -68,6 +68,25 @@ POLL_INTERVAL_MS=150
 # from $TERM_PROGRAM. Set explicitly if auto-detection picks the wrong app.
 TERMINAL_BUNDLE_ID=''
 
+# Escalation: if the alarm goes unacknowledged this many seconds, bring the
+# terminal to the front. 0 disables.
+#
+# This exists because Notification Center cannot be relied on. On macOS 15 a
+# notification is routinely accepted, recorded, and never displayed -- sound
+# plays, no banner, nothing to approve, no error anywhere. It affects osascript
+# and terminal-notifier alike (julienXX/terminal-notifier#312). Raising a window
+# goes through LaunchServices instead, needs no permission of any kind, and is
+# harder to miss than a banner even when banners do work.
+#
+# Raising also dismisses the alarm on its own: the terminal becomes frontmost,
+# which is exactly what the focus watcher below is waiting for.
+RAISE_TERMINAL_AFTER=8
+
+# Speak the alert once when the alarm starts. Also needs no permission, and
+# carries from another room. 0 disables.
+SPEAK=0
+SPEAK_VOICE=''
+
 # Turn-timestamp files are written one per Claude session and are worthless once
 # the session ends. Anything older than this many days is pruned on next use.
 STATE_RETENTION_DAYS=7
@@ -192,17 +211,42 @@ resolve_sound() {
 
 detect_terminal_bundle_id() {
   [ -n "$TERMINAL_BUNDLE_ID" ] && { printf '%s' "$TERMINAL_BUNDLE_ID"; return; }
+
   case "$TERM_PROGRAM" in
-    Apple_Terminal) printf 'com.apple.Terminal' ;;
-    iTerm.app)      printf 'com.googlecode.iterm2' ;;
-    vscode)         printf 'com.microsoft.VSCode' ;;
-    ghostty)        printf 'com.mitchellh.ghostty' ;;
-    WezTerm)        printf 'com.github.wez.wezterm' ;;
-    Hyper)          printf 'co.zeit.hyper' ;;
-    Alacritty)      printf 'org.alacritty' ;;
-    WarpTerminal)   printf 'dev.warp.Warp-Stable' ;;
-    *)              printf '' ;;
+    Apple_Terminal) printf 'com.apple.Terminal';    return ;;
+    iTerm.app)      printf 'com.googlecode.iterm2'; return ;;
+    vscode)         printf 'com.microsoft.VSCode';  return ;;
+    ghostty)        printf 'com.mitchellh.ghostty'; return ;;
+    WezTerm)        printf 'com.github.wez.wezterm';return ;;
+    Hyper)          printf 'co.zeit.hyper';         return ;;
+    Alacritty)      printf 'org.alacritty';         return ;;
+    WarpTerminal)   printf 'dev.warp.Warp-Stable';  return ;;
   esac
+
+  # TERM_PROGRAM is not always exported into the hook environment -- it is empty
+  # for hooks spawned by Claude Code on at least some installs, which silently
+  # disabled both focus-dismissal and the raise. Fall back to walking the
+  # process ancestry for enclosing .app bundles.
+  #
+  # Take the OUTERMOST match, not the first: the chain runs
+  #   zsh -> ClaudeCode.app -> claude -> login -> Terminal.app
+  # so the innermost .app is Claude Code's own helper bundle, while the terminal
+  # window we actually want to raise sits furthest from us.
+  local pid cmd appdir id last=''
+  pid=$$
+  while [ "${pid:-0}" -gt 1 ]; do
+    cmd=$(ps -p "$pid" -o comm= 2>/dev/null)
+    case "$cmd" in
+      *.app/Contents/MacOS/*)
+        appdir="${cmd%%.app/*}.app"
+        id=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' \
+               "$appdir/Contents/Info.plist" 2>/dev/null)
+        [ -n "$id" ] && last="$id"
+        ;;
+    esac
+    pid=$(ps -p "$pid" -o ppid= 2>/dev/null | tr -d ' ')
+  done
+  printf '%s' "$last"
 }
 
 front_bundle_id() {
@@ -227,9 +271,17 @@ notify() {
 
   if command -v terminal-notifier >/dev/null 2>&1; then
     # terminal-notifier gets us click-to-focus, which osascript cannot do.
+    #
+    # -sender is not cosmetic on macOS 15. Both terminal-notifier's own bundle
+    # id and the Script Editor identity osascript borrows are refused a banner
+    # there: the notification is accepted and recorded, its sound plays, and it
+    # is never presented. Sending as an app that already holds notification
+    # permission -- the terminal Claude is running in -- is what makes it
+    # render. See julienXX/terminal-notifier#312.
     if [ -n "$bundle" ]; then
-      terminal-notifier -title "$title" -message "$body  (click to open)" \
-        -activate "$bundle" -group claude-alarm >/dev/null 2>&1 &
+      terminal-notifier -sender "$bundle" -activate "$bundle" \
+        -title "$title" -message "$body  (click to open)" \
+        -group claude-alarm >/dev/null 2>&1 &
     else
       terminal-notifier -title "$title" -message "$body" \
         -group claude-alarm >/dev/null 2>&1 &
@@ -291,8 +343,10 @@ remove_own_pid_file() {
   return 0
 }
 
+SAY_PID=''
 cleanup() {
   [ -n "$AF_PID" ] && kill "$AF_PID" 2>/dev/null
+  [ -n "$SAY_PID" ] && kill "$SAY_PID" 2>/dev/null
   remove_own_pid_file
 }
 
@@ -332,7 +386,18 @@ invoke_alarm() {
     printf 'claude-alarm: sound %s not found, falling back\n' "$sound_name" >&2
   fi
 
-  local deadline poll_s arm_polls polls
+  if [ "$SPEAK" -eq 1 ]; then
+    if [ -n "$SPEAK_VOICE" ]; then
+      say -v "$SPEAK_VOICE" "$body" >/dev/null 2>&1 &
+    else
+      say "$body" >/dev/null 2>&1 &
+    fi
+    SAY_PID=$!
+  fi
+
+  local deadline poll_s arm_polls polls started raised
+  started=$(now_s)
+  raised=0
   deadline=$(( $(now_s) + ALARM_SECONDS ))
   poll_s=$(awk "BEGIN{printf \"%.3f\", $POLL_INTERVAL_MS/1000}")
   arm_polls=$(( FOREGROUND_ARM_DELAY_MS / POLL_INTERVAL_MS ))
@@ -350,6 +415,14 @@ invoke_alarm() {
     # rather than at the end of a multi-second sound.
     while :; do
       polls=$(( polls + 1 ))
+
+      # Escalate before checking focus, so the raise we perform is what the
+      # focus check then sees and dismisses on.
+      if [ "$RAISE_TERMINAL_AFTER" -gt 0 ] && [ "$raised" -eq 0 ] && [ -n "$bundle" ] &&
+         [ $(( $(now_s) - started )) -ge "$RAISE_TERMINAL_AFTER" ]; then
+        open -b "$bundle" >/dev/null 2>&1
+        raised=1
+      fi
 
       if [ "$polls" -ge "$arm_polls" ] && [ -n "$bundle" ]; then
         if [ "$(front_bundle_id 2>/dev/null)" = "$bundle" ]; then

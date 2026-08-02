@@ -69,6 +69,32 @@ No dependencies: `afplay`, `osascript`, `lsappinfo` and bash 3.2 all ship with m
    bash ~/.claude/hooks/alarm.sh test-needs-input
    ```
 
+### Notification Center is not reliable on macOS 15 — raising the window is
+
+On some Macs a notification is accepted, recorded in Notification Center's
+database, its sound plays, and it is **never displayed**. No prompt to approve,
+no error, nothing in any log. It affects `osascript` and `terminal-notifier`
+alike — see [terminal-notifier#312](https://github.com/julienXX/terminal-notifier/issues/312)
+and [Apple's own thread](https://discussions.apple.com/thread/255766920). The
+usual community fixes (the mirroring toggle, alert style, `-sender`, restarting
+`usernoted`) fix it for some people and not others.
+
+So the macOS port does not depend on it. `RAISE_TERMINAL_AFTER` (default 8s)
+brings the terminal to the front if you haven't reacted:
+
+```
+alarm fires -> sound loops -> 8s pass with no reaction -> terminal comes to front
+```
+
+Raising goes through LaunchServices, needs no permission of any kind, and is
+harder to miss than a banner even where banners work — the window physically
+appears in front of whatever you were looking at. It also dismisses the alarm on
+its own, since the terminal becoming frontmost is exactly what focus-to-dismiss
+waits for. Set it to `0` if you'd rather it never steal focus.
+
+`SPEAK=1` additionally says the message out loud, which carries from another room.
+Neither needs permission, and both work with the notification silently broken.
+
 ### If you hear the alarm but never see a banner
 
 macOS attributes `osascript` notifications to **Script Editor**, and on a stock
@@ -126,7 +152,10 @@ On macOS the equivalents are `ENABLED=1`, `SOUND_DONE='Hero'`,
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `SOUND_DIR` | `~/.claude/sounds` | Where your own sound files live. |
-| `TERMINAL_BUNDLE_ID` | `''` | Terminal to treat as "the Claude window". Empty = auto-detect from `$TERM_PROGRAM`. |
+| `TERMINAL_BUNDLE_ID` | `''` | Terminal to treat as "the Claude window". Empty = auto-detect. |
+| `RAISE_TERMINAL_AFTER` | `8` | Bring the terminal to the front after this many unacknowledged seconds. `0` disables. |
+| `SPEAK` | `0` | Say the alert out loud. |
+| `SPEAK_VOICE` | `''` | Voice for `SPEAK`, e.g. `Samantha`. Empty = system default. |
 
 Browse `C:\Windows\Media\` for other Windows sounds. `Alarm01`–`Alarm10` and
 `Ring01`–`Ring10` are the attention-grabbing ones; `chimes`, `ding`, and `notify`
@@ -192,6 +221,19 @@ and WezTerm) alongside a tray balloon, which is what renders the visible banner 
 terminals that ignore OSC notifications.
 
 ### macOS specifics
+
+**`$TERM_PROGRAM` cannot be trusted to identify the terminal.** It is empty in the
+hook environment on at least some installs, and an empty bundle id silently
+disables both focus-to-dismiss and the raise — the alarm still sounds, so nothing
+looks broken. The fallback walks the process ancestry for enclosing `.app`
+bundles and takes the **outermost** one. That ordering matters: the chain runs
+
+```
+zsh -> ClaudeCode.app -> claude -> login -> Terminal.app
+```
+
+so the innermost `.app` is Claude Code's own helper bundle (`com.anthropic.claude-code`),
+while the terminal window you actually want to raise sits furthest from you.
 
 **Frontmost-app detection avoids AppleScript.** The obvious way to ask what's focused
 is `osascript -e 'tell application "System Events" ... frontmost ...'`, but System
