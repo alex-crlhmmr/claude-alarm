@@ -1,0 +1,75 @@
+{
+  "_comment": "macOS version. Merge the 'hooks' block below into ~/.claude/settings.json. Replace YOUR_USERNAME with your own, or point the script argument wherever you installed alarm.sh. Paths must be absolute: hook args are executed directly, not through a shell, so ~ and environment variables are not expanded.",
+
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash",
+            "args": [
+              "/Users/YOUR_USERNAME/.claude/hooks/alarm.sh",
+              "start"
+            ],
+            "async": true,
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash",
+            "args": [
+              "/Users/YOUR_USERNAME/.claude/hooks/alarm.sh",
+              "banner-done"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "/bin/bash",
+            "args": [
+              "/Users/YOUR_USERNAME/.claude/hooks/alarm.sh",
+              "done"
+            ],
+            "async": true,
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt|idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash",
+            "args": [
+              "/Users/YOUR_USERNAME/.claude/hooks/alarm.sh",
+              "banner-needs-input"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "/bin/bash",
+            "args": [
+              "/Users/YOUR_USERNAME/.claude/hooks/alarm.sh",
+              "needs-input"
+            ],
+            "async": true,
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

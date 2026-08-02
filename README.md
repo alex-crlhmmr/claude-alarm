@@ -4,17 +4,18 @@ Falling asleep between prompts? No more! Alarm bells whenever your task finishes
 An alarm bell for [Claude Code](https://code.claude.com). Walk away from a long
 task and get woken up when it finishes — or when Claude is blocked waiting on you.
 
-A single looping alarm sound, a desktop notification, and a flashing taskbar
-button. Clicking the notification brings the right terminal window to the front.
+A single looping alarm sound and a desktop notification, plus a flashing taskbar
+button on Windows. Clicking the notification brings the terminal to the front.
 
-> **Windows only.** See [Platform support](#platform-support) before you invest.
+> **Windows** (`alarm.ps1`) and **macOS** (`alarm.sh`). See
+> [Platform support](#platform-support).
 
 ## What it does
 
-| Event | Trigger | Sound | Gated? |
+| Event | Trigger | Sound (Windows / macOS) | Gated? |
 | --- | --- | --- | --- |
-| `Stop` | Claude finishes a turn | `Alarm03.wav` (rising alarm) | Only if the turn took **>60s** |
-| `Notification` | Permission prompt or idle prompt | `Ring01.wav` (phone ring) | No — fires immediately |
+| `Stop` | Claude finishes a turn | `Alarm03.wav` / `Hero` | Only if the turn took **>60s** |
+| `Notification` | Permission prompt or idle prompt | `Ring01.wav` / `Sosumi` | No — fires immediately |
 | `UserPromptSubmit` | You type something | — | Kills any running alarm |
 
 Short turns stay silent, so it only speaks up when you've actually walked away.
@@ -24,14 +25,16 @@ If Claude is blocked on you, there's no delay at all.
 
 Whichever is laziest:
 
-- **Focus the Claude terminal window** — stops in ~200ms
-- **Click the tray notification** — surfaces the terminal *and* stops the alarm
+- **Focus the Claude terminal** — stops in ~200ms (on macOS this is app-level, not
+  per-window; see [Platform support](#platform-support))
+- **Click the notification** — surfaces the terminal *and* stops the alarm
+  (macOS: requires `terminal-notifier`, see below)
 - **Type anything into Claude** — the `UserPromptSubmit` hook kills it
 - **Do nothing** — it gives up after 20 seconds
 
 Only one alarm ever runs. Starting a new one kills the previous, so they never stack.
 
-## Install
+## Install — Windows
 
 1. Copy `alarm.ps1` to `~/.claude/hooks/alarm.ps1`.
 2. Merge the `hooks` block from `settings.example.json` into `~/.claude/settings.json`,
@@ -49,9 +52,35 @@ Only one alarm ever runs. Starting a new one kills the previous, so they never s
 If you already have hooks on these events, add these entries to the existing
 `hooks` arrays rather than replacing them.
 
+## Install — macOS
+
+No dependencies: `afplay`, `osascript`, `lsappinfo` and bash 3.2 all ship with macOS.
+
+1. Copy `alarm.sh` to `~/.claude/hooks/alarm.sh`.
+2. Merge the `hooks` block from `settings.example.macos.json` into
+   `~/.claude/settings.json`, replacing `YOUR_USERNAME` with your own.
+
+   As on Windows, hook `args` are executed directly rather than through a shell,
+   so `~` and `$HOME` are **not** expanded — the path must be absolute and literal.
+
+3. Restart Claude Code, or just start a new turn. Verify with:
+
+   ```bash
+   bash ~/.claude/hooks/alarm.sh test-needs-input
+   ```
+
+**The first alarm will ask for notification permission.** macOS attributes
+`osascript` notifications to Script Editor, so approve it when prompted (or in
+System Settings → Notifications). If you never approve, banners silently do
+nothing — the *sound* still works, since `afplay` has no permission gate. Focus
+or Do Not Disturb suppresses the banner but not the sound.
+
+Optional: `brew install terminal-notifier` to get click-the-notification-to-focus,
+which plain `osascript` cannot do. The script uses it automatically if present.
+
 ## Configuration
 
-Everything tunable is in one block at the top of `alarm.ps1`:
+Everything tunable is in one block at the top of `alarm.ps1` / `alarm.sh`:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -65,8 +94,34 @@ Everything tunable is in one block at the top of `alarm.ps1`:
 | `$FLASH_TASKBAR` | `$true` | Flash the terminal's taskbar button. |
 | `$STATE_RETENTION_DAYS` | `7` | Prune turn-timestamp files older than this. |
 
-Browse `C:\Windows\Media\` for other sounds. `Alarm01`–`Alarm10` and `Ring01`–`Ring10`
-are the attention-grabbing ones; `chimes`, `ding`, and `notify` are gentler.
+On macOS the equivalents are `ENABLED=1`, `SOUND_DONE='Hero'`,
+`SOUND_NEEDS_INPUT='Sosumi'`, and there is no `FLASH_TASKBAR`. Two extra knobs:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SOUND_DIR` | `~/.claude/sounds` | Where your own sound files live. |
+| `TERMINAL_BUNDLE_ID` | `''` | Terminal to treat as "the Claude window". Empty = auto-detect from `$TERM_PROGRAM`. |
+
+Browse `C:\Windows\Media\` for other Windows sounds. `Alarm01`–`Alarm10` and
+`Ring01`–`Ring10` are the attention-grabbing ones; `chimes`, `ding`, and `notify`
+are gentler.
+
+### Custom sounds (macOS)
+
+`SOUND_DONE` and `SOUND_NEEDS_INPUT` resolve in this order:
+
+1. an **absolute path** — used as-is
+2. a **directory** under `~/.claude/sounds/` — a random file from it, re-rolled per
+   alarm, so `SOUND_DONE='done'` with five files in `~/.claude/sounds/done/` rotates
+3. a **name** under `~/.claude/sounds/` — first match, any extension
+4. a **built-in** in `/System/Library/Sounds/`
+
+`afplay` is CoreAudio, so `.aiff`, `.wav`, `.mp3`, `.m4a` and `.caf` all work with no
+conversion. Built-ins on every Mac: `Basso` `Blow` `Bottle` `Frog` `Funk` `Glass`
+`Hero` `Morse` `Ping` `Pop` `Purr` `Sosumi` `Submarine` `Tink`.
+
+An unresolvable name falls back to a built-in and warns on stderr rather than going
+silently quiet, since a silent alarm is indistinguishable from a hook that never fired.
 
 ### Why `$FOREGROUND_ARM_DELAY_MS` exists
 
@@ -77,13 +132,13 @@ if you'd rather have complete silence whenever you're already at the keyboard.
 
 ## Disabling
 
-| Scope | How |
-| --- | --- |
-| Silence alarms, keep hooks wired | `$ENABLED = $false` |
-| Kill an alarm sounding right now | Type anything, or run `alarm.ps1 -Action stop` |
-| Stop "done" only, keep "needs input" | `$MIN_TURN_SECONDS = 999999` |
-| Turn off every Claude Code hook | `"disableAllHooks": true` in `settings.json` |
-| Remove entirely | Delete the hook entries and `alarm.ps1` |
+| Scope | Windows | macOS |
+| --- | --- | --- |
+| Silence alarms, keep hooks wired | `$ENABLED = $false` | `ENABLED=0` |
+| Kill an alarm sounding right now | Type anything, or `alarm.ps1 -Action stop` | Type anything, or `alarm.sh stop` |
+| Stop "done" only, keep "needs input" | `$MIN_TURN_SECONDS = 999999` | `MIN_TURN_SECONDS=999999` |
+| Turn off every Claude Code hook | `"disableAllHooks": true` in `settings.json` | same |
+| Remove entirely | Delete the hook entries and `alarm.ps1` | Delete the hook entries and `alarm.sh` |
 
 ## How it works
 
@@ -110,22 +165,52 @@ The notification uses OSC 9 (allowlisted by Claude Code for Windows Terminal, Co
 and WezTerm) alongside a tray balloon, which is what renders the visible banner on
 terminals that ignore OSC notifications.
 
+### macOS specifics
+
+**Frontmost-app detection avoids AppleScript.** The obvious way to ask what's focused
+is `osascript -e 'tell application "System Events" ... frontmost ...'`, but System
+Events needs an Automation permission grant — a hook firing in the background would
+trip a TCC prompt, or silently fail forever once denied. `lsappinfo front` returns the
+same answer with no permission of any kind, so focus-to-dismiss works out of the box.
+
+**Killing an alarm needs an explicit `exit`.** A bash trap handler returns to where it
+was interrupted rather than exiting. A `TERM` handler that only killed the child
+`afplay` would let the poll loop notice the child was gone and start a *new* one — the
+alarm surviving its own kill and leaking a player each round. The handler exits.
+
+**The pid file is only cleared by its owner.** A newer alarm `TERM`s the old one and
+then writes its own pid; the old one's trap can fire *after* that write, so an
+unconditional `rm` would delete the newer alarm's registration and let the round after
+it stack. Cleanup checks the file still contains its own pid first.
+
 ## Platform support
 
-**Windows only right now.** It depends on `System.Media.SoundPlayer`, WinForms
-`NotifyIcon`, and Win32 `user32.dll` calls for window targeting.
+**Windows** (`alarm.ps1`) and **macOS** (`alarm.sh`).
 
-The equivalent primitives exist elsewhere and ports are welcome:
+macOS is dependency-free — `afplay`, `osascript`, `lsappinfo` and bash 3.2 all ship
+with the OS — with two deliberate differences from Windows:
 
-- **macOS** — `afplay /System/Library/Sounds/Sosumi.aiff`, `osascript -e 'display notification'`
-- **Linux** — `paplay`/`aplay` against `/usr/share/sounds/`, `notify-send`, terminal bell fallback
+- **Focus-to-dismiss is app-level, not window-level.** Windows targets the exact
+  terminal window via its title marker; macOS compares the frontmost *application*
+  bundle id. Focusing any window of your terminal app dismisses the alarm.
+- **Click-to-focus needs `terminal-notifier`.** `osascript` notifications carry no
+  click action. Install `terminal-notifier` and the script uses it automatically.
 
-The hook wiring in `settings.example.json` is platform-agnostic; only the `command`
-and the script body need replacing.
+Linux ports are still welcome — `paplay`/`aplay` against `/usr/share/sounds/`,
+`notify-send`, terminal bell fallback.
+
+The hook wiring is platform-agnostic; only the `command` and the script body change.
 
 ## Privacy
 
 The only data written to disk is a Unix timestamp per Claude session, under
-`.alarm-state/`, used to decide whether a turn ran long enough to be worth an alarm.
-Files are named by session id and pruned after `$STATE_RETENTION_DAYS`. Nothing is
-sent anywhere. `.alarm-state/` is gitignored.
+`.alarm-state/` (macOS: `~/.claude/hooks/.alarm-state/`, mode `0700`), used to decide
+whether a turn ran long enough to be worth an alarm. Files are named by session id and
+pruned after `STATE_RETENTION_DAYS`. Nothing is sent anywhere. `.alarm-state/` is
+gitignored.
+
+The session id is the only externally-supplied value either script handles. It arrives
+on stdin from Claude Code and is stripped to `[A-Za-z0-9_-]` before use, because it
+goes on to be interpolated into a terminal escape sequence and a filename. On macOS,
+every string reaching AppleScript is passed through `argv` rather than interpolated
+into the script source, so a quote in a title or body cannot become AppleScript.
