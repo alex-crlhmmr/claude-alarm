@@ -69,14 +69,40 @@ No dependencies: `afplay`, `osascript`, `lsappinfo` and bash 3.2 all ship with m
    bash ~/.claude/hooks/alarm.sh test-needs-input
    ```
 
-**The first alarm will ask for notification permission.** macOS attributes
-`osascript` notifications to Script Editor, so approve it when prompted (or in
-System Settings → Notifications). If you never approve, banners silently do
-nothing — the *sound* still works, since `afplay` has no permission gate. Focus
-or Do Not Disturb suppresses the banner but not the sound.
+### If you hear the alarm but never see a banner
+
+macOS attributes `osascript` notifications to **Script Editor**, and on a stock
+machine Script Editor is registered in Notification Center with "Allow
+Notifications" **off**. There is no permission prompt to approve — the
+notification is accepted, stored, and silently never displayed.
+
+Fix it once, in System Settings → Notifications → **Script Editor** → **Allow
+Notifications** on.
+
+To confirm it is actually the cause rather than a mistimed banner, every
+notification macOS accepts is logged with a `presented` flag:
+
+```bash
+python3 - <<'PY'
+import sqlite3, os, datetime
+p = os.path.expanduser("~/Library/Group Containers/group.com.apple.usernoted/db2/db")
+c = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
+q = """SELECT datetime(r.delivered_date+978307200,'unixepoch','localtime'), r.presented
+       FROM record r JOIN app a ON a.app_id=r.app_id
+       WHERE a.identifier='com.apple.scripteditor2'
+       ORDER BY r.delivered_date DESC LIMIT 5"""
+for ts, shown in c.execute(q):
+    print(ts, "presented" if shown else "NOT SHOWN (permission is off)")
+PY
+```
+
+The *sound* is unaffected either way — `afplay` has no permission gate. Focus and
+Do Not Disturb suppress the banner but not the sound.
 
 Optional: `brew install terminal-notifier` to get click-the-notification-to-focus,
-which plain `osascript` cannot do. The script uses it automatically if present.
+which plain `osascript` cannot do. The script uses it automatically if present, and
+it sidesteps the problem above by registering its own bundle id, which does prompt
+for permission normally.
 
 ## Configuration
 
