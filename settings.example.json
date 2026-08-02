@@ -1,0 +1,100 @@
+{
+  "_comment": "Merge the 'hooks' block below into ~/.claude/settings.json. Replace YOUR_USERNAME with your own, or point the -File argument wherever you installed alarm.ps1. Paths must be absolute: hook args are executed directly, not through a shell, so environment variables are not expanded.",
+
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "C:\\Users\\YOUR_USERNAME\\.claude\\hooks\\alarm.ps1",
+              "-Action",
+              "start"
+            ],
+            "async": true,
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "C:\\Users\\YOUR_USERNAME\\.claude\\hooks\\alarm.ps1",
+              "-Action",
+              "banner-done"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "powershell",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "C:\\Users\\YOUR_USERNAME\\.claude\\hooks\\alarm.ps1",
+              "-Action",
+              "done"
+            ],
+            "async": true,
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt|idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "C:\\Users\\YOUR_USERNAME\\.claude\\hooks\\alarm.ps1",
+              "-Action",
+              "banner-needs-input"
+            ],
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "powershell",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "C:\\Users\\YOUR_USERNAME\\.claude\\hooks\\alarm.ps1",
+              "-Action",
+              "needs-input"
+            ],
+            "async": true,
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,2 @@
+# Runtime state: turn timestamps (contain Claude session ids) and the alarm lockfile.
+.alarm-state/
