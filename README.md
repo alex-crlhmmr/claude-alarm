@@ -1,4 +1,5 @@
 # claude-code-alarm
+Falling asleep between prompts? No more! Alarm bells whenever your task finishes.
 
 An alarm bell for [Claude Code](https://code.claude.com). Walk away from a long
 task and get woken up when it finishes — or when Claude is blocked waiting on you.
