@@ -87,6 +87,24 @@ RAISE_TERMINAL_AFTER=8
 SPEAK=0
 SPEAK_VOICE=''
 
+# Optional: claude-notify, https://github.com/armandsalle/claude-notify
+#
+# On macOS 15 this is often the only thing that shows a banner at all, and the
+# only one that can act on a click -- see the README section on Notification
+# Center. Install it and this picks it up automatically; leave it uninstalled
+# and the alarm falls back to terminal-notifier, then osascript, then to the
+# sound and the raise, which need no notification system at all.
+CLAUDE_NOTIFY='/Applications/ClaudeNotify.app/Contents/MacOS/ClaudeNotify'
+
+# Last-resort fallback: a clickable dialog window with a button that takes you to
+# the terminal. Off by default -- it is an ugly modal box, not a notification.
+#
+# Turn it on only if you get no banner at all. A dialog is an ordinary window
+# owned by the terminal app rather than a notification, so it still renders on
+# machines where Notification Center refuses to display anything.
+DIALOG=0
+DIALOG_BUTTON='Go to terminal'
+
 # Turn-timestamp files are written one per Claude session and are worthless once
 # the session ends. Anything older than this many days is pruned on next use.
 STATE_RETENTION_DAYS=7
@@ -269,6 +287,19 @@ front_bundle_id() {
 notify() {
   local title="$1" body="$2" bundle="$3"
 
+  # Preferred: claude-notify. Backgrounded and deliberately never killed --
+  # clicking a banner is only routed back while the process that posted it is
+  # still alive, so reaping it is what produces "The application is not open
+  # anymore". It is a menu-bar daemon and later alarms reuse the same instance.
+  if [ -n "$CLAUDE_NOTIFY" ] && [ -x "$CLAUDE_NOTIFY" ]; then
+    if [ -n "$bundle" ]; then
+      "$CLAUDE_NOTIFY" -m "$body" -t "$title" -a "$bundle" >/dev/null 2>&1 &
+    else
+      "$CLAUDE_NOTIFY" -m "$body" -t "$title" >/dev/null 2>&1 &
+    fi
+    return
+  fi
+
   if command -v terminal-notifier >/dev/null 2>&1; then
     # terminal-notifier gets us click-to-focus, which osascript cannot do.
     #
@@ -278,13 +309,15 @@ notify() {
     # is never presented. Sending as an app that already holds notification
     # permission -- the terminal Claude is running in -- is what makes it
     # render. See julienXX/terminal-notifier#312.
+    # No -group. Grouping makes a repeat send *replace* the existing
+    # notification in that group, and a replacement is not re-presented -- the
+    # record's timestamp updates and no banner ever appears. It looked like a
+    # permission problem and was not one.
     if [ -n "$bundle" ]; then
       terminal-notifier -sender "$bundle" -activate "$bundle" \
-        -title "$title" -message "$body  (click to open)" \
-        -group claude-alarm >/dev/null 2>&1 &
+        -title "$title" -message "$body  (click to open)" >/dev/null 2>&1 &
     else
-      terminal-notifier -title "$title" -message "$body" \
-        -group claude-alarm >/dev/null 2>&1 &
+      terminal-notifier -title "$title" -message "$body" >/dev/null 2>&1 &
     fi
     return
   fi
@@ -344,10 +377,42 @@ remove_own_pid_file() {
 }
 
 SAY_PID=''
+DIALOG_PID=''
+CLICK_FILE=''
 cleanup() {
   [ -n "$AF_PID" ] && kill "$AF_PID" 2>/dev/null
   [ -n "$SAY_PID" ] && kill "$SAY_PID" 2>/dev/null
+  # Kill the osascript child too, not just the subshell wrapping it, or the
+  # dialog outlives the alarm that put it up.
+  if [ -n "$DIALOG_PID" ]; then
+    pkill -P "$DIALOG_PID" 2>/dev/null
+    kill "$DIALOG_PID" 2>/dev/null
+  fi
+  [ -n "$CLICK_FILE" ] && rm -f "$CLICK_FILE" 2>/dev/null
   remove_own_pid_file
+}
+
+# Put the dialog up in the background, writing osascript's result to a file the
+# poll loop watches. osascript is backgrounded directly rather than wrapped in a
+# subshell so DIALOG_PID is the osascript itself: killing it closes the dialog,
+# where killing a wrapper left the dialog on screen after the alarm ended.
+#
+# osascript prints "gave up:false" when a button was actually pressed and
+# "gave up:true" when the dialog timed out, which is how a click is told apart
+# from being ignored.
+#
+# The dialog is owned by the terminal app via "tell application id" so it renders
+# as that app's own window -- an ordinary window, not a notification, which is
+# why it appears on machines where no banner ever does. Strings go through argv,
+# never interpolated into the AppleScript source.
+start_dialog() {
+  local title="$1" body="$2" bundle="$3" secs="$4" out="$5"
+  osascript \
+    -e 'on run argv' \
+    -e 'tell application id (item 3 of argv) to display dialog (item 1 of argv) with title (item 2 of argv) buttons {(item 5 of argv)} default button 1 giving up after (item 4 of argv as integer)' \
+    -e 'end run' \
+    "$body" "$title" "$bundle" "$secs" "$DIALOG_BUTTON" > "$out" 2>/dev/null &
+  DIALOG_PID=$!
 }
 
 # A bash trap handler returns to where it was interrupted; it does not exit.
@@ -395,6 +460,13 @@ invoke_alarm() {
     SAY_PID=$!
   fi
 
+  if [ "$DIALOG" -eq 1 ] && [ -n "$bundle" ]; then
+    CLICK_FILE="$STATE_DIR/click.$$"
+    rm -f "$CLICK_FILE" 2>/dev/null
+    show_dialog "$title" "$body" "$bundle" "$ALARM_SECONDS" "$CLICK_FILE" &
+    DIALOG_PID=$!
+  fi
+
   local deadline poll_s arm_polls polls started raised
   started=$(now_s)
   raised=0
@@ -416,17 +488,28 @@ invoke_alarm() {
     while :; do
       polls=$(( polls + 1 ))
 
-      # Escalate before checking focus, so the raise we perform is what the
-      # focus check then sees and dismisses on.
-      if [ "$RAISE_TERMINAL_AFTER" -gt 0 ] && [ "$raised" -eq 0 ] && [ -n "$bundle" ] &&
-         [ $(( $(now_s) - started )) -ge "$RAISE_TERMINAL_AFTER" ]; then
-        open -b "$bundle" >/dev/null 2>&1
-        raised=1
+      # You clicked the dialog button: it already raised the terminal.
+      if [ -n "$CLICK_FILE" ] && [ -f "$CLICK_FILE" ]; then
+        cleanup; trap - EXIT; return 0
       fi
 
-      if [ "$polls" -ge "$arm_polls" ] && [ -n "$bundle" ]; then
-        if [ "$(front_bundle_id 2>/dev/null)" = "$bundle" ]; then
-          cleanup; trap - EXIT; return 0
+      # The raise and the focus watcher only apply when there is no dialog. With
+      # a dialog up they would end the alarm -- and take the dialog down with it
+      # -- within seconds: the raise makes the terminal frontmost, which is
+      # exactly what the focus watcher treats as "dismissed". The dialog has to
+      # outlive that to be clickable, so when it is showing it is the only way
+      # the alarm ends early.
+      if [ -z "$CLICK_FILE" ]; then
+        if [ "$RAISE_TERMINAL_AFTER" -gt 0 ] && [ "$raised" -eq 0 ] && [ -n "$bundle" ] &&
+           [ $(( $(now_s) - started )) -ge "$RAISE_TERMINAL_AFTER" ]; then
+          open -b "$bundle" >/dev/null 2>&1
+          raised=1
+        fi
+
+        if [ "$polls" -ge "$arm_polls" ] && [ -n "$bundle" ]; then
+          if [ "$(front_bundle_id 2>/dev/null)" = "$bundle" ]; then
+            cleanup; trap - EXIT; return 0
+          fi
         fi
       fi
 

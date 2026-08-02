@@ -69,7 +69,7 @@ No dependencies: `afplay`, `osascript`, `lsappinfo` and bash 3.2 all ship with m
    bash ~/.claude/hooks/alarm.sh test-needs-input
    ```
 
-### Notification Center is not reliable on macOS 15 — raising the window is
+### Notification Center on macOS 15
 
 On some Macs a notification is accepted, recorded in Notification Center's
 database, its sound plays, and it is **never displayed**. No prompt to approve,
@@ -77,10 +77,31 @@ no error, nothing in any log. It affects `osascript` and `terminal-notifier`
 alike — see [terminal-notifier#312](https://github.com/julienXX/terminal-notifier/issues/312)
 and [Apple's own thread](https://discussions.apple.com/thread/255766920). The
 usual community fixes (the mirroring toggle, alert style, `-sender`, restarting
-`usernoted`) fix it for some people and not others.
+`usernoted`) work for some people and not others; on the machine this port was
+developed against, none of them did.
 
-So the macOS port does not depend on it. `RAISE_TERMINAL_AFTER` (default 8s)
-brings the terminal to the front if you haven't reacted:
+What does work there is [claude-notify](https://github.com/armandsalle/claude-notify),
+a menu-bar daemon. Install it and `alarm.sh` uses it automatically:
+
+```bash
+git clone https://github.com/armandsalle/claude-notify && cd claude-notify
+./build.sh && cp -r .build/release/ClaudeNotify.app /Applications/
+codesign --force --deep --sign - /Applications/ClaudeNotify.app
+```
+
+Two things about it are worth knowing, because both cost hours to work out:
+
+- **Do not run it from a LaunchAgent.** Clicking a banner is only routed back to
+  the process that *posted* it. Under launchd the CLI relays to a separate daemon
+  and the click has nothing to route to, which fails with "The application is not
+  open anymore" — the banner appears and the click is dead. `alarm.sh` therefore
+  backgrounds it and never kills it.
+- **A transient process cannot work at all.** Anything that posts a notification
+  and exits can show a banner but can never handle a click. This is why the
+  working implementations are all daemons; it is not a flag you are missing.
+
+If you skip it entirely, the alarm still works — `RAISE_TERMINAL_AFTER`
+(default 8s) brings the terminal to the front if you haven't reacted:
 
 ```
 alarm fires -> sound loops -> 8s pass with no reaction -> terminal comes to front
@@ -154,6 +175,7 @@ On macOS the equivalents are `ENABLED=1`, `SOUND_DONE='Hero'`,
 | `SOUND_DIR` | `~/.claude/sounds` | Where your own sound files live. |
 | `TERMINAL_BUNDLE_ID` | `''` | Terminal to treat as "the Claude window". Empty = auto-detect. |
 | `RAISE_TERMINAL_AFTER` | `8` | Bring the terminal to the front after this many unacknowledged seconds. `0` disables. |
+| `CLAUDE_NOTIFY` | `/Applications/ClaudeNotify.app/…` | Path to claude-notify. Used automatically when present. |
 | `SPEAK` | `0` | Say the alert out loud. |
 | `SPEAK_VOICE` | `''` | Voice for `SPEAK`, e.g. `Samantha`. Empty = system default. |
 
