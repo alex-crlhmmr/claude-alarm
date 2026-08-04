@@ -173,6 +173,7 @@ On macOS the equivalents are `ENABLED=1`, `SOUND_DONE='Hero'`,
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `SOUND_DIR` | `~/.claude/sounds` | Where your own sound files live. |
+| `ALARM_CONF` | `~/.claude/hooks/alarm.conf` | Sourced after the defaults; overrides any of them. Written by `/alarm-sound`. |
 | `TERMINAL_BUNDLE_ID` | `''` | Terminal to treat as "the Claude window". Empty = auto-detect. |
 | `RAISE_TERMINAL_AFTER` | `8` | Bring the terminal to the front after this many unacknowledged seconds. `0` disables. |
 | `CLAUDE_NOTIFY` | `/Applications/ClaudeNotify.app/…` | Path to claude-notify. Used automatically when present. |
@@ -199,6 +200,35 @@ conversion. Built-ins on every Mac: `Basso` `Blow` `Bottle` `Frog` `Funk` `Glass
 
 An unresolvable name falls back to a built-in and warns on stderr rather than going
 silently quiet, since a silent alarm is indistinguishable from a hook that never fired.
+
+Prefer `.wav` or `.aiff`. They are uncompressed and start instantly, where a
+compressed file has a short decode delay that is audible on a sound meant to be a
+prompt alert. Keep clips to **1–4 seconds** — they loop for up to `ALARM_SECONDS`,
+so a longer one never reaches its end.
+
+### Choosing sounds without editing the script
+
+`alarm.sh` sources `~/.claude/hooks/alarm.conf` after its own defaults, so anything
+set there wins and updating the script does not overwrite your choices:
+
+```bash
+SOUND_DONE='Hero'
+SOUND_NEEDS_INPUT='Submarine'
+```
+
+It is sourced, so it is shell rather than an ini file — quoted values, no colons.
+
+The bundled `alarm-sound` skill writes that file for you. Install it with:
+
+```bash
+mkdir -p ~/.claude/skills/alarm-sound
+cp skills/alarm-sound/SKILL.md ~/.claude/skills/alarm-sound/
+```
+
+Then `/alarm-sound` lists what is in `~/.claude/sounds/` alongside the built-ins,
+previews them, and saves the pair you pick. It deliberately does the choosing
+ahead of time rather than prompting mid-alarm — an alarm that asks a question is
+useless to someone who has walked away from the keyboard.
 
 ### Why `$FOREGROUND_ARM_DELAY_MS` exists
 

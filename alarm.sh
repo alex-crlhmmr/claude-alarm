@@ -111,9 +111,9 @@ STATE_RETENTION_DAYS=7
 
 # Text shown in the notification and the terminal title bar.
 TITLE_DONE='Claude Code'
-BODY_DONE='Turn finished.'
+BODY_DONE='Turn finished — ready for you.'
 TITLE_NEEDS_INPUT='Claude Code'
-BODY_NEEDS_INPUT='Blocked -- needs your input.'
+BODY_NEEDS_INPUT='Waiting on you to continue.'
 
 # Marker written into the terminal title by the banner hooks. Cosmetic on macOS
 # (unlike Windows, the alarm does not need it to find the window).
@@ -122,6 +122,16 @@ TITLE_MARKER='(!) Claude'
 # ==========================================================================
 #  End of config
 # ==========================================================================
+
+# Per-machine overrides, sourced after the defaults so it can change any of
+# them. Written by the /alarm-sound command; edit it by hand if you prefer.
+# Keeping choices here rather than in this file means updating the script does
+# not overwrite your settings.
+#
+# It is sourced, so it is shell, not an ini file -- `SOUND_DONE='chime'`, not
+# `SOUND_DONE: chime`. It runs with your privileges like any other hook.
+ALARM_CONF="${ALARM_CONF:-$HOME/.claude/hooks/alarm.conf}"
+[ -f "$ALARM_CONF" ] && . "$ALARM_CONF"
 
 SCRIPT_NAME=$(basename "$0")
 STATE_DIR="$HOME/.claude/hooks/.alarm-state"
