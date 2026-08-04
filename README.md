@@ -28,7 +28,7 @@ Whichever is laziest:
 - **Focus the Claude terminal** — stops in ~200ms (on macOS this is app-level, not
   per-window; see [Platform support](#platform-support))
 - **Click the notification** — surfaces the terminal *and* stops the alarm
-  (macOS: requires `terminal-notifier`, see below)
+  (macOS: requires [claude-notify](#notification-center-on-macos-15))
 - **Type anything into Claude** — the `UserPromptSubmit` hook kills it
 - **Do nothing** — it gives up after 20 seconds
 
@@ -146,10 +146,10 @@ PY
 The *sound* is unaffected either way — `afplay` has no permission gate. Focus and
 Do Not Disturb suppress the banner but not the sound.
 
-Optional: `brew install terminal-notifier` to get click-the-notification-to-focus,
-which plain `osascript` cannot do. The script uses it automatically if present, and
-it sidesteps the problem above by registering its own bundle id, which does prompt
-for permission normally.
+`brew install terminal-notifier` is worth trying — the script uses it automatically
+if present — but do not expect it to fix this. It is subject to the same failure,
+and on the machine this port was developed against it never displayed a banner
+either. [claude-notify](#notification-center-on-macos-15) is what worked.
 
 ## Configuration
 
@@ -283,8 +283,11 @@ with the OS — with two deliberate differences from Windows:
 - **Focus-to-dismiss is app-level, not window-level.** Windows targets the exact
   terminal window via its title marker; macOS compares the frontmost *application*
   bundle id. Focusing any window of your terminal app dismisses the alarm.
-- **Click-to-focus needs `terminal-notifier`.** `osascript` notifications carry no
-  click action. Install `terminal-notifier` and the script uses it automatically.
+- **Click-to-focus needs a notification daemon.** `osascript` notifications carry no
+  click action at all, and a process that posts a notification and exits can never
+  handle a click regardless of how it posts it. Install
+  [claude-notify](#notification-center-on-macos-15) and the script uses it
+  automatically; without it you still get the sound and the raise.
 
 Linux ports are still welcome — `paplay`/`aplay` against `/usr/share/sounds/`,
 `notify-send`, terminal bell fallback.
