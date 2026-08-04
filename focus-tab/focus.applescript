@@ -27,7 +27,20 @@ on valueFor(k, ls)
 	return ""
 end valueFor
 
+-- Both entry points do the same thing. A plain activate -- which is all
+-- claude-notify does on click -- will not re-run a just-exited applet, so
+-- launching fresh every time was unreliable: measured 1 success in 3. Staying
+-- open and handling reopen covers both cases. If it is running, the click
+-- reopens it; if macOS has reaped it, the click launches it and run fires.
 on run
+	doFocus()
+end run
+
+on reopen
+	doFocus()
+end reopen
+
+on doFocus()
 	set f to (POSIX path of (path to home folder)) & ".claude/hooks/.alarm-state/focus-target"
 	set raw to ""
 	try
@@ -49,7 +62,7 @@ on run
 	else
 		focusWindowByTitle(theBundle, theCwd)
 	end if
-end run
+end doFocus
 
 on focusTerminalTab(theTty)
 	tell application "Terminal"

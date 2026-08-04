@@ -26,7 +26,11 @@ SRC="$(cd "$(dirname "$0")" && pwd)/focus.applescript"
 
 mkdir -p "$HOME/Applications"
 rm -rf "$APP"
-osacompile -o "$APP" "$SRC"
+# -s: stay open. A plain activate -- which is all claude-notify does on click --
+# will not re-run a just-exited applet, so a quit-after-run build only focused
+# the tab about one click in three. Staying open means the click reopens a live
+# process instead, and the script handles both run and reopen.
+osacompile -s -o "$APP" "$SRC"
 
 # osacompile stamps its own generic identifier; alarm.sh needs a stable one to
 # hand to claude-notify's -a flag.
