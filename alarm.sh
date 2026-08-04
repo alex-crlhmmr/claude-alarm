@@ -189,6 +189,13 @@ now_s() { date +%s; }
 # the script, and it goes on to be interpolated into a terminal escape sequence.
 # stdin can only be consumed once, and more than one field is wanted from it,
 # so it is slurped a single time and reused.
+#
+# Called explicitly from the dispatch below, and only for the actions Claude Code
+# actually pipes JSON to. It must not be called lazily from a getter: "cat" on a
+# stdin that is open but never delivers EOF blocks forever, and a -t 0 check does
+# not catch that -- a pipe is not a tty whether or not anything is coming. Hooks
+# are fine because Claude Code writes its JSON and closes, but a manual or
+# scripted run with an inherited pipe would hang the alarm indefinitely.
 HOOK_JSON=''
 HOOK_JSON_READ=''
 read_hook_stdin() {
@@ -200,7 +207,6 @@ read_hook_stdin() {
 
 get_session_key() {
   local key=''
-  read_hook_stdin
   key=$(printf '%s' "$HOOK_JSON" \
     | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' \
     | head -1 \
@@ -215,12 +221,16 @@ get_session_key() {
 # stripped: this is attacker-influenced like session_id, and it is written to a
 # file that a helper app reads back line by line.
 get_cwd() {
-  read_hook_stdin
-  printf '%s' "$HOOK_JSON" \
+  local c
+  c=$(printf '%s' "$HOOK_JSON" \
     | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' \
     | head -1 \
     | sed 's/.*"\([^"]*\)"$/\1/' \
-    | tr -d '\\"' | tr -d '\n\r'
+    | tr -d '\\"' | tr -d '\n\r')
+  # Falls back to the working directory, which is what a test run wants and is
+  # correct for a hook too -- hooks inherit the session's cwd.
+  [ -n "$c" ] || c=$PWD
+  printf '%s' "$c"
 }
 
 # Short, human-tolerable window tag: first 8 chars of the session id.
@@ -659,6 +669,7 @@ case "$ACTION" in
 
   start)
     # User typed something: they're awake. Kill any alarm and stamp the turn.
+    read_hook_stdin
     init_state_dir
     stop_running_alarm
     remove_stale_turn_files
@@ -671,6 +682,7 @@ case "$ACTION" in
     ;;
 
   done)
+    read_hook_stdin
     init_state_dir
     KEY=$(get_session_key)
     turn_was_long "$KEY" && invoke_alarm "$SOUND_DONE" "$TITLE_DONE" "$BODY_DONE"
@@ -678,11 +690,13 @@ case "$ACTION" in
 
   needs-input)
     # No duration gate: if Claude is blocked on you, you want to know now.
+    read_hook_stdin
     init_state_dir
     invoke_alarm "$SOUND_NEEDS_INPUT" "$TITLE_NEEDS_INPUT" "$BODY_NEEDS_INPUT"
     ;;
 
   banner-done)
+    read_hook_stdin
     init_state_dir
     KEY=$(get_session_key)
     if [ "$ENABLED" -eq 1 ] && turn_was_long "$KEY"; then
@@ -691,6 +705,7 @@ case "$ACTION" in
     ;;
 
   banner-needs-input)
+    read_hook_stdin
     init_state_dir
     KEY=$(get_session_key)
     [ "$ENABLED" -eq 1 ] && \
