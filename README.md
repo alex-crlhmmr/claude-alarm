@@ -132,12 +132,24 @@ rather than a regression:
 iTerm2 is scriptable and could be supported — it exposes tabs through a different
 object model, so it needs its own script rather than a tweak to this one.
 
-**VS Code cannot be supported at this layer.** Its integrated terminals are real
-ptys with real ttys, but VS Code exposes no AppleScript interface to enumerate or
-focus them; there is no supported way to say "focus terminal 3 in window 2" from
-outside the editor. That needs a VS Code extension. The same applies to several
-terminals inside one tab: our match is per tab, and split panes are not
-addressable this way even in Terminal.app.
+**VS Code cannot be supported**, and it is worth saying why precisely, because
+there are two plausible-looking routes and both are closed:
+
+- **AppleScript** — VS Code ships no scripting dictionary at all (no
+  `NSAppleScriptEnabled`, no `sdef`), so there is nothing to script.
+- **Accessibility API** — the usual fallback for non-scriptable apps. With
+  Accessibility granted and demonstrably working, VS Code's main process reports
+  **zero windows**: Electron only publishes an AX tree when it detects a screen
+  reader. There is nothing to enumerate or raise.
+
+Forcing the second would mean enabling `editor.accessibilitySupport`, which puts
+the editor into screen-reader mode. Not a fair trade for a window raise.
+
+So in VS Code a click activates the app and macOS restores the last-focused
+window, which is what it did before this feature existed.
+
+The same limit applies to several terminals inside one tab: the match is per
+tab, and split panes are not addressable this way even in Terminal.app.
 
 > One trap if you adapt this: `set index of window w to 1` reorders AppleScript's
 > own window list without raising the window on screen, so the script reports

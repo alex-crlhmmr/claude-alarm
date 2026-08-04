@@ -119,6 +119,14 @@ CLAUDE_NOTIFY='/Applications/ClaudeNotify.app/Contents/MacOS/ClaudeNotify'
 # Anywhere but Terminal.app the click just activates the app, as before.
 FOCUS_HELPER_APP="$HOME/Applications/FocusClaudeTab.app"
 FOCUS_HELPER_BUNDLE='com.claudealarm.focustab'
+#
+# VS Code is deliberately NOT in this list. It has no AppleScript dictionary, and
+# the Accessibility fallback does not work either: with Accessibility granted and
+# working, its main process reports zero windows, because Electron only publishes
+# an AX tree when it detects a screen reader. There is nothing to enumerate or
+# raise. Routing it through the helper would achieve exactly what activating the
+# app already does. The helper still handles the generic case, so another
+# non-scriptable terminal that does publish windows can be added here.
 FOCUS_HELPER_TERMINALS='com.apple.Terminal'
 
 # Last-resort fallback: a clickable dialog window with a button that takes you to
@@ -179,18 +187,40 @@ now_s() { date +%s; }
 # free (no jq, no python3), and hard-sanitised to [A-Za-z0-9_-] on the way out.
 # That sanitising is load-bearing: this is the only attacker-influenced value in
 # the script, and it goes on to be interpolated into a terminal escape sequence.
+# stdin can only be consumed once, and more than one field is wanted from it,
+# so it is slurped a single time and reused.
+HOOK_JSON=''
+HOOK_JSON_READ=''
+read_hook_stdin() {
+  [ -n "$HOOK_JSON_READ" ] && return 0
+  HOOK_JSON_READ=1
+  [ -t 0 ] || HOOK_JSON=$(cat 2>/dev/null)
+  return 0
+}
+
 get_session_key() {
-  local raw key=''
-  if [ ! -t 0 ]; then
-    raw=$(cat 2>/dev/null)
-    key=$(printf '%s' "$raw" \
-      | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' \
-      | head -1 \
-      | sed 's/.*"\([^"]*\)"$/\1/' \
-      | tr -cd 'A-Za-z0-9_-')
-  fi
+  local key=''
+  read_hook_stdin
+  key=$(printf '%s' "$HOOK_JSON" \
+    | grep -o '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' \
+    | head -1 \
+    | sed 's/.*"\([^"]*\)"$/\1/' \
+    | tr -cd 'A-Za-z0-9_-')
   [ -n "$key" ] || key='default'
   printf '%s' "$key"
+}
+
+# The working directory of the session, used to pick the right editor window --
+# its title carries the folder name. Newlines, quotes and backslashes are
+# stripped: this is attacker-influenced like session_id, and it is written to a
+# file that a helper app reads back line by line.
+get_cwd() {
+  read_hook_stdin
+  printf '%s' "$HOOK_JSON" \
+    | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' \
+    | head -1 \
+    | sed 's/.*"\([^"]*\)"$/\1/' \
+    | tr -d '\\"' | tr -d '\n\r'
 }
 
 # Short, human-tolerable window tag: first 8 chars of the session id.
@@ -341,10 +371,14 @@ notify() {
   case " $FOCUS_HELPER_TERMINALS " in
     *" $bundle "*)
       if [ -n "$FOCUS_HELPER_APP" ] && [ -d "$FOCUS_HELPER_APP" ]; then
-        tty=$(our_tty) && {
-          printf '%s\n' "$tty" > "$STATE_DIR/focus-tty" 2>/dev/null
-          target="$FOCUS_HELPER_BUNDLE"
-        }
+        tty=$(our_tty)
+        {
+          printf 'bundle=%s\n' "$bundle"
+          printf 'tty=%s\n'    "$tty"
+          printf 'cwd=%s\n'    "$(get_cwd)"
+        } > "$STATE_DIR/focus-target" 2>/dev/null
+        chmod 600 "$STATE_DIR/focus-target" 2>/dev/null
+        target="$FOCUS_HELPER_BUNDLE"
       fi
       ;;
   esac
