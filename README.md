@@ -118,7 +118,26 @@ and Terminal exposes it per tab.
 It needs Automation permission for Terminal, requested once on the first click.
 Decline it and clicks still raise the terminal, just not the specific tab.
 
-Currently **Terminal.app only** — iTerm2 and others expose tabs differently.
+**Terminal.app only**, enforced by `FOCUS_HELPER_TERMINALS`. Everywhere else the
+click activates the app exactly as before, which is the pre-existing behaviour
+rather than a regression:
+
+| Terminal | Click behaviour |
+| --- | --- |
+| Terminal.app | lands on the exact tab |
+| iTerm2 | activates the app |
+| VS Code | activates the app |
+| Ghostty / WezTerm / others | activates the app |
+
+iTerm2 is scriptable and could be supported — it exposes tabs through a different
+object model, so it needs its own script rather than a tweak to this one.
+
+**VS Code cannot be supported at this layer.** Its integrated terminals are real
+ptys with real ttys, but VS Code exposes no AppleScript interface to enumerate or
+focus them; there is no supported way to say "focus terminal 3 in window 2" from
+outside the editor. That needs a VS Code extension. The same applies to several
+terminals inside one tab: our match is per tab, and split panes are not
+addressable this way even in Terminal.app.
 
 > One trap if you adapt this: `set index of window w to 1` reorders AppleScript's
 > own window list without raising the window on screen, so the script reports

@@ -110,8 +110,16 @@ CLAUDE_NOTIFY='/Applications/ClaudeNotify.app/Contents/MacOS/ClaudeNotify'
 #
 # Build it with focus-tab/build.sh. Needs Automation permission for your
 # terminal, granted once on first click. Unset to just activate the app.
+#
+# Terminal.app only, and the guard below enforces that. The helper scripts
+# Terminal specifically; it cannot address tabs in anything else. iTerm2 is
+# scriptable but exposes tabs through a different object model, and VS Code's
+# integrated terminals -- real ptys with real ttys -- are not exposed to
+# AppleScript at all, so there is no way to focus one from outside the editor.
+# Anywhere but Terminal.app the click just activates the app, as before.
 FOCUS_HELPER_APP="$HOME/Applications/FocusClaudeTab.app"
 FOCUS_HELPER_BUNDLE='com.claudealarm.focustab'
+FOCUS_HELPER_TERMINALS='com.apple.Terminal'
 
 # Last-resort fallback: a clickable dialog window with a button that takes you to
 # the terminal. Off by default -- it is an ugly modal box, not a notification.
@@ -330,12 +338,16 @@ notify() {
 
   # Hand the click to the tab-focus helper when it is installed, leaving the
   # tty where it can find it. Falls back to activating the terminal app.
-  if [ -n "$FOCUS_HELPER_APP" ] && [ -d "$FOCUS_HELPER_APP" ]; then
-    tty=$(our_tty) && {
-      printf '%s\n' "$tty" > "$STATE_DIR/focus-tty" 2>/dev/null
-      target="$FOCUS_HELPER_BUNDLE"
-    }
-  fi
+  case " $FOCUS_HELPER_TERMINALS " in
+    *" $bundle "*)
+      if [ -n "$FOCUS_HELPER_APP" ] && [ -d "$FOCUS_HELPER_APP" ]; then
+        tty=$(our_tty) && {
+          printf '%s\n' "$tty" > "$STATE_DIR/focus-tty" 2>/dev/null
+          target="$FOCUS_HELPER_BUNDLE"
+        }
+      fi
+      ;;
+  esac
 
   # Preferred: claude-notify. Backgrounded and deliberately never killed --
   # clicking a banner is only routed back while the process that posted it is
