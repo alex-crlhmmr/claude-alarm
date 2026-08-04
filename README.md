@@ -100,6 +100,31 @@ Two things about it are worth knowing, because both cost hours to work out:
   and exits can show a banner but can never handle a click. This is why the
   working implementations are all daemons; it is not a flag you are missing.
 
+#### Clicking the banner lands on the right tab
+
+Activating an app restores whatever tab was last focused in it, which is the
+wrong one whenever Claude is in a background tab. `focus-tab/` fixes that:
+
+```bash
+./focus-tab/build.sh
+```
+
+`alarm.sh` then hands the click to that helper instead of to the terminal, and
+it selects the tab by **tty**. Not by window title — Claude Code overwrites the
+title with its own session name, so the `(!) Claude` marker the banner hook
+writes is not reliably there to match on. A tty is exact and cannot collide,
+and Terminal exposes it per tab.
+
+It needs Automation permission for Terminal, requested once on the first click.
+Decline it and clicks still raise the terminal, just not the specific tab.
+
+Currently **Terminal.app only** — iTerm2 and others expose tabs differently.
+
+> One trap if you adapt this: `set index of window w to 1` reorders AppleScript's
+> own window list without raising the window on screen, so the script reports
+> success while you land on whatever was visually on top. `set frontmost of
+> window w to true` is what actually raises it.
+
 #### Custom banner icon
 
 A notification shows the icon of the app that posted it, so a custom icon goes

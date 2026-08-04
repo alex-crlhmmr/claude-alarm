@@ -80,7 +80,7 @@ TERMINAL_BUNDLE_ID=''
 #
 # Raising also dismisses the alarm on its own: the terminal becomes frontmost,
 # which is exactly what the focus watcher below is waiting for.
-RAISE_TERMINAL_AFTER=8
+RAISE_TERMINAL_AFTER=0
 
 # Speak the alert once when the alarm starts. Also needs no permission, and
 # carries from another room. 0 disables.
@@ -95,6 +95,23 @@ SPEAK_VOICE=''
 # and the alarm falls back to terminal-notifier, then osascript, then to the
 # sound and the raise, which need no notification system at all.
 CLAUDE_NOTIFY='/Applications/ClaudeNotify.app/Contents/MacOS/ClaudeNotify'
+
+# Optional: focus the exact terminal tab Claude is running in when you click the
+# banner, rather than just bringing the terminal app forward.
+#
+# Activating an app restores whatever tab was last focused there, which is the
+# wrong one whenever you left Claude in a background tab. claude-notify can only
+# activate an app on click, not run a command, so the click points at a tiny
+# helper app whose whole job is to select the right tab and quit.
+#
+# The tab is matched on tty, not on window title: Claude Code overwrites the
+# title with its own session name, so the OSC 0 marker the banner hook writes is
+# not reliably there to match against. tty is exact and cannot collide.
+#
+# Build it with focus-tab/build.sh. Needs Automation permission for your
+# terminal, granted once on first click. Unset to just activate the app.
+FOCUS_HELPER_APP="$HOME/Applications/FocusClaudeTab.app"
+FOCUS_HELPER_BUNDLE='com.claudealarm.focustab'
 
 # Last-resort fallback: a clickable dialog window with a button that takes you to
 # the terminal. Off by default -- it is an ugly modal box, not a notification.
@@ -294,16 +311,39 @@ front_bundle_id() {
 # or body -- including anything derived from hook stdin -- an AppleScript
 # injection. Passing argv removes that class of bug outright.
 
+# The tty of the terminal this session is attached to. Hook processes have no
+# controlling terminal of their own, so walk up until a parent does -- the
+# nearest one is the shell Claude runs in, which is the tab we want focused.
+our_tty() {
+  local pid t
+  pid=$$
+  while [ "${pid:-0}" -gt 1 ]; do
+    t=$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ')
+    if [ -n "$t" ] && [ "$t" != "??" ]; then printf '/dev/%s' "$t"; return 0; fi
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+  done
+  return 1
+}
+
 notify() {
-  local title="$1" body="$2" bundle="$3"
+  local title="$1" body="$2" bundle="$3" target="$3" tty=''
+
+  # Hand the click to the tab-focus helper when it is installed, leaving the
+  # tty where it can find it. Falls back to activating the terminal app.
+  if [ -n "$FOCUS_HELPER_APP" ] && [ -d "$FOCUS_HELPER_APP" ]; then
+    tty=$(our_tty) && {
+      printf '%s\n' "$tty" > "$STATE_DIR/focus-tty" 2>/dev/null
+      target="$FOCUS_HELPER_BUNDLE"
+    }
+  fi
 
   # Preferred: claude-notify. Backgrounded and deliberately never killed --
   # clicking a banner is only routed back while the process that posted it is
   # still alive, so reaping it is what produces "The application is not open
   # anymore". It is a menu-bar daemon and later alarms reuse the same instance.
   if [ -n "$CLAUDE_NOTIFY" ] && [ -x "$CLAUDE_NOTIFY" ]; then
-    if [ -n "$bundle" ]; then
-      "$CLAUDE_NOTIFY" -m "$body" -t "$title" -a "$bundle" >/dev/null 2>&1 &
+    if [ -n "$target" ]; then
+      "$CLAUDE_NOTIFY" -m "$body" -t "$title" -a "$target" >/dev/null 2>&1 &
     else
       "$CLAUDE_NOTIFY" -m "$body" -t "$title" >/dev/null 2>&1 &
     fi
@@ -324,7 +364,7 @@ notify() {
     # record's timestamp updates and no banner ever appears. It looked like a
     # permission problem and was not one.
     if [ -n "$bundle" ]; then
-      terminal-notifier -sender "$bundle" -activate "$bundle" \
+      terminal-notifier -sender "$bundle" -activate "$target" \
         -title "$title" -message "$body  (click to open)" >/dev/null 2>&1 &
     else
       terminal-notifier -title "$title" -message "$body" >/dev/null 2>&1 &
