@@ -100,6 +100,23 @@ Two things about it are worth knowing, because both cost hours to work out:
   and exits can show a banner but can never handle a click. This is why the
   working implementations are all daemons; it is not a flag you are missing.
 
+#### Custom banner icon
+
+A notification shows the icon of the app that posted it, so a custom icon goes
+into claude-notify's bundle:
+
+```bash
+./install-notifier-icon.sh path/to/image.png
+```
+
+Any format `sips` reads works, and non-square input is padded rather than
+cropped. macOS caches icons hard: if the old one persists, the script's own
+advice applies — it restarts the daemon, but you may also need
+`killall Dock NotificationCenter usernoted`, and occasionally a logout.
+
+Because this writes into `/Applications/ClaudeNotify.app`, **updating
+claude-notify wipes it**. Re-run the script; that is why it is a script.
+
 If you skip it entirely, the alarm still works — `RAISE_TERMINAL_AFTER`
 (default 8s) brings the terminal to the front if you haven't reacted:
 
